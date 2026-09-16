@@ -5,6 +5,8 @@ on:
     paths:
       - "*.zip"
 
+  workflow_dispatch:
+
 jobs:
   extract:
     runs-on: ubuntu-latest
