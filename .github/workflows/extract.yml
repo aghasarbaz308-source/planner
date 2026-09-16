@@ -25,18 +25,23 @@ jobs:
           zip_files=(*.zip)
           
           if [ ${#zip_files[@]} -eq 0 ]; then
-            echo "فایل زیپ پیدا نشد."
+            echo "هیچ فایل زیپی در ریشه پروژه پیدا نشد!"
             exit 0
           fi
 
           mkdir -p extracted
           for f in "${zip_files[@]}"; do
-            echo "در حال اکسترکت: $f"
+            echo "در حال اکسترکت کردن: $f"
             unzip -o "$f" -d extracted
           done
 
       - name: Commit and push changes
         run: |
+          if [ ! -d "extracted" ]; then
+            echo "پوشه extracted وجود ندارد، عملیات کامیت لغو شد."
+            exit 0
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
