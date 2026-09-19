@@ -222,9 +222,29 @@ export const BlockModal: React.FC<BlockModalProps> = ({
 
             {/* Duration */}
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                مدت زمان
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-semibold text-slate-700">
+                  مدت زمان
+                </label>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setDurationMinutes((prev) => Math.max(15, prev - 30))}
+                    className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-mono font-bold"
+                    title="کاهش ۳۰ دقیقه"
+                  >
+                    ۳۰-
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDurationMinutes((prev) => Math.min(480, prev + 30))}
+                    className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-mono font-bold"
+                    title="افزایش ۳۰ دقیقه"
+                  >
+                    ۳۰+
+                  </button>
+                </div>
+              </div>
               <select
                 value={durationMinutes}
                 onChange={(e) => setDurationMinutes(Number(e.target.value))}
@@ -236,6 +256,24 @@ export const BlockModal: React.FC<BlockModalProps> = ({
                   </option>
                 ))}
               </select>
+
+              {/* Quick Select Chips (e.g. 1h, 2h, 3h, 4h) */}
+              <div className="flex items-center gap-1 mt-1.5 overflow-x-auto pb-0.5">
+                {[30, 45, 60, 90, 120, 150, 180, 210, 240].map((dur) => (
+                  <button
+                    key={dur}
+                    type="button"
+                    onClick={() => setDurationMinutes(dur)}
+                    className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border transition-all shrink-0 ${
+                      durationMinutes === dur
+                        ? 'bg-indigo-600 text-white border-indigo-600'
+                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    {dur >= 60 ? `${toFaDigits(dur / 60)}س` : `${toFaDigits(dur)}د`}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 

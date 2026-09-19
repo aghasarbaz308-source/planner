@@ -7,7 +7,7 @@ import '@fontsource/vazirmatn/600.css';
 import '@fontsource/vazirmatn/700.css';
 import '@fontsource/vazirmatn/800.css';
 import '@fontsource/vazirmatn/900.css';
-import App from './App.tsx';
+import App from './App';
 import './index.css';
 
 createRoot(document.getElementById('root')!).render(

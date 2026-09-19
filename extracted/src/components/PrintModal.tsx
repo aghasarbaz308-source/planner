@@ -36,6 +36,7 @@ import {
 } from '../constants/plannerConfig';
 import { TimeBlock, DayKey, CategoryKey } from '../types';
 import { CategoryIcon } from './CategoryIcon';
+import { computeDayBlockLayout, PositionedBlock } from '../utils/calendarLayout';
 
 interface PrintModalProps {
   isOpen: boolean;
@@ -141,6 +142,23 @@ export const PrintModal: React.FC<PrintModalProps> = ({
     const calculatedSlot = Math.floor(availableGridHeight / timeSlots.length);
     return Math.max(calculatedSlot, orientation === 'portrait' ? 32 : 20);
   }, [sheetDimensions.height, showStats, showNotesBox, showLegend, timeSlots.length, orientation]);
+
+  // Pre-calculate mathematically bounded, strictly non-overlapping block coordinates for print
+  const positionedBlocksByDay = useMemo(() => {
+    const map: Record<string, PositionedBlock[]> = {};
+    for (const d of DAYS) {
+      const dayBlocks = blocks.filter((b) => b.day === d.id);
+      map[d.id] = computeDayBlockLayout(dayBlocks, {
+        startHour: START_HOUR,
+        endHour: END_HOUR,
+        slotInterval: SLOT_INTERVAL,
+        slotHeight: slotHeightPx,
+        minVisualHeight: 8,
+        gapPx: 1.5,
+      });
+    }
+    return map;
+  }, [blocks, slotHeightPx]);
 
   if (!isOpen) return null;
 
@@ -743,17 +761,14 @@ export const PrintModal: React.FC<PrintModalProps> = ({
                         />
                       ))}
 
-                      {/* Rendered Time Blocks with crisp print styling */}
-                      {dayBlocks.map((block) => {
+                      {/* Rendered Time Blocks with crisp print styling & zero overlap guarantee */}
+                      {(positionedBlocksByDay[day.id] || []).map((item) => {
+                        const { block, topPx, visualHeight, colIndex, totalCols } = item;
                         const theme = CATEGORIES[block.category] || CATEGORIES.custom;
-                        const startOffsetSlots =
-                          (block.startMinutes - START_HOUR * 60) / SLOT_INTERVAL;
-                        const durationSlots = block.durationMinutes / SLOT_INTERVAL;
-
-                        const topPx = startOffsetSlots * slotHeightPx;
-                        const heightPx = durationSlots * slotHeightPx;
-                        const visualHeight = Math.max(heightPx - 2, 20);
-                        const isCompact = visualHeight <= 34;
+                        const isMultiCol = totalCols > 1;
+                        const isCompact = visualHeight <= 26;
+                        const showSubtitle = visualHeight >= 42 && block.subtitle;
+                        const showFooter = visualHeight >= 36;
 
                         const startStr = minutesToTimeString(block.startMinutes);
                         const endStr = minutesToTimeString(block.startMinutes + block.durationMinutes);
@@ -765,14 +780,17 @@ export const PrintModal: React.FC<PrintModalProps> = ({
                             style={{
                               top: `${topPx}px`,
                               height: `${visualHeight}px`,
+                              right: isMultiCol ? `calc(${(colIndex * 100) / totalCols}% + 1px)` : '1.5px',
+                              width: isMultiCol ? `calc(${100 / totalCols}% - 2px)` : 'calc(100% - 3px)',
+                              left: 'auto',
                               backgroundColor: theme.printBg,
                               borderColor: theme.printBorder,
                               color: theme.printText,
                             }}
-                            className="absolute inset-x-0.5 rounded-sm border overflow-hidden shadow-2xs box-border"
+                            className="absolute rounded-xs border overflow-hidden shadow-2xs box-border z-10"
                           >
                             {isCompact ? (
-                              <div className="flex items-center justify-between h-full px-1 gap-1 overflow-hidden box-border">
+                              <div className="flex items-center justify-between h-full px-1 gap-1 overflow-hidden box-border leading-none">
                                 <div className="flex items-center gap-1 min-w-0 flex-1 overflow-hidden">
                                   {block.completed ? (
                                     <span className="w-2.5 h-2.5 rounded-xs bg-emerald-700 text-white flex items-center justify-center shrink-0">
@@ -785,7 +803,7 @@ export const PrintModal: React.FC<PrintModalProps> = ({
                                     />
                                   )}
                                   <h4
-                                    className={`text-[8.5px] font-bold truncate leading-none min-w-0 flex-1 ${
+                                    className={`text-[8px] font-bold truncate leading-none min-w-0 flex-1 ${
                                       block.completed ? 'line-through opacity-70' : ''
                                     }`}
                                     style={{ color: theme.printText, letterSpacing: '0px' }}
@@ -794,7 +812,7 @@ export const PrintModal: React.FC<PrintModalProps> = ({
                                   </h4>
                                 </div>
                                 <span
-                                  className="text-[7.5px] px-1 py-0.2 rounded-xs font-mono font-bold shrink-0 bg-white/90"
+                                  className="text-[7px] px-1 py-0.2 rounded-xs font-mono font-bold shrink-0 bg-white/90 leading-none"
                                   style={{ color: theme.printText }}
                                 >
                                   {timeRange}
@@ -803,10 +821,10 @@ export const PrintModal: React.FC<PrintModalProps> = ({
                             ) : (
                               <div className="flex flex-col justify-between h-full p-1 overflow-hidden box-border">
                                 {/* Block Header */}
-                                <div className="flex items-center justify-between gap-1 w-full min-w-0 shrink-0">
+                                <div className="flex items-center justify-between gap-1 w-full min-w-0 shrink-0 leading-none">
                                   <div className="flex items-center gap-1 min-w-0 flex-1">
                                     {block.completed ? (
-                                      <span className="w-3 h-3 rounded-xs bg-emerald-700 text-white flex items-center justify-center shrink-0">
+                                      <span className="w-2.5 h-2.5 rounded-xs bg-emerald-700 text-white flex items-center justify-center shrink-0">
                                         <Check className="w-2 h-2 stroke-[3]" />
                                       </span>
                                     ) : (
@@ -816,7 +834,7 @@ export const PrintModal: React.FC<PrintModalProps> = ({
                                       />
                                     )}
                                     <h4
-                                      className={`text-[9px] font-bold leading-snug truncate min-w-0 flex-1 ${
+                                      className={`text-[8.5px] font-bold leading-none truncate min-w-0 flex-1 ${
                                         block.completed ? 'line-through opacity-70' : ''
                                       }`}
                                       style={{ color: theme.printText, letterSpacing: '0px' }}
@@ -826,7 +844,7 @@ export const PrintModal: React.FC<PrintModalProps> = ({
                                   </div>
 
                                   <span
-                                    className="text-[7.5px] px-1 py-0.2 rounded-xs font-mono font-bold shrink-0 bg-white/90"
+                                    className="text-[7px] px-1 py-0.2 rounded-xs font-mono font-bold shrink-0 bg-white/90 leading-none"
                                     style={{ color: theme.printText }}
                                   >
                                     {timeRange}
@@ -834,10 +852,10 @@ export const PrintModal: React.FC<PrintModalProps> = ({
                                 </div>
 
                                 {/* Subtitle if height permits */}
-                                {visualHeight >= 48 && block.subtitle && (
-                                  <div className="my-auto min-w-0 overflow-hidden">
+                                {showSubtitle && (
+                                  <div className="my-auto min-w-0 overflow-hidden leading-tight">
                                     <p
-                                      className="text-[8px] opacity-90 truncate leading-snug"
+                                      className="text-[7.5px] opacity-90 truncate"
                                       style={{ letterSpacing: '0px' }}
                                     >
                                       {block.subtitle}
@@ -846,8 +864,8 @@ export const PrintModal: React.FC<PrintModalProps> = ({
                                 )}
 
                                 {/* Bottom row: duration and category tag */}
-                                {visualHeight >= 42 && (
-                                  <div className="flex items-center justify-between text-[8px] opacity-80 pt-0.5 border-t border-black/10 mt-auto shrink-0">
+                                {showFooter && (
+                                  <div className="flex items-center justify-between text-[7.5px] opacity-80 pt-0.5 border-t border-black/10 mt-auto shrink-0 leading-none">
                                     <span className="truncate">{theme.label}</span>
                                     <span className="font-mono font-bold shrink-0">
                                       {formatDurationFa(block.durationMinutes)}

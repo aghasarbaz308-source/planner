@@ -21,26 +21,49 @@ import { ClearConfirmModal } from './components/ClearConfirmModal';
 import { OfflineExportModal } from './components/OfflineExportModal';
 import { SpecialWeeklyReportModal } from './components/SpecialWeeklyReportModal';
 import { InsertBreakModal } from './components/InsertBreakModal';
+import { EmergencyRecoveryModal } from './components/EmergencyRecoveryModal';
+import { JalaliCalendarModal } from './components/JalaliCalendarModal';
+import { CreateNewWeekModal } from './components/CreateNewWeekModal';
+import { TutorialModal } from './components/TutorialModal';
+import { ReminderSettingsModal } from './components/ReminderSettingsModal';
+import { CategoryManagerModal } from './components/CategoryManagerModal';
+import { DailyAuditHistoryModal } from './components/DailyAuditHistoryModal';
+import { QuickAddSlotModal } from './components/QuickAddSlotModal';
+import { DatabaseSettingsModal } from './components/DatabaseSettingsModal';
+import { reminderService } from './services/reminderService';
+import { PlannerStorageService } from './services/plannerStorage';
+import { formatWeekRangeFa, getWeekId, getSaturdayOfWeek } from './utils/jalaliCalendar';
 import { CheckCircle2, AlertCircle, Info, Sparkles } from 'lucide-react';
 
 const STORAGE_KEY = 'anti_fragile_timeboxing_planner_v2';
 
 export default function App() {
+  // Shamsi Week & Calendar State
+  const [currentDate, setCurrentDate] = useState<Date>(() => new Date());
+  const [isCalendarModalOpen, setIsCalendarModalOpen] = useState(false);
+  const [isCreateWeekModalOpen, setIsCreateWeekModalOpen] = useState(false);
+  const [targetCreateDate, setTargetCreateDate] = useState<Date>(() => new Date());
+
   // State
   const [plannerTitle, setPlannerTitle] = useState<string>(
     'برنامه‌ریز هفتگی تایم‌باکسینگ (Anti-Fragile)'
   );
   const [weekRange, setWeekRange] = useState<string>(
-    'اسپرینت لینوکس و مدل‌سازی یادگیری عمیق'
+    formatWeekRangeFa(new Date())
   );
   const [templates, setTemplates] = useState<BlockTemplate[]>(INITIAL_TEMPLATES);
   const [blocks, setBlocks] = useState<TimeBlock[]>(INITIAL_SAMPLE_BLOCKS);
+
+  // Undo / Redo State Stack (Professional Anti-Fragile History Engine)
+  const [history, setHistory] = useState<TimeBlock[][]>([]);
+  const [redoStack, setRedoStack] = useState<TimeBlock[][]>([]);
 
   // Modals & Drawers
   const [selectedBlock, setSelectedBlock] = useState<TimeBlock | null>(null);
   const [editingTemplate, setEditingTemplate] = useState<BlockTemplate | null>(null);
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
   const [isLateShiftOpen, setIsLateShiftOpen] = useState(false);
+  const [isEmergencyRecoveryOpen, setIsEmergencyRecoveryOpen] = useState(false);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [isJsonModalOpen, setIsJsonModalOpen] = useState(false);
   const [isDailyReportOpen, setIsDailyReportOpen] = useState(false);
@@ -51,6 +74,32 @@ export default function App() {
   const [isOfflineModalOpen, setIsOfflineModalOpen] = useState(false);
   const [showStats, setShowStats] = useState(true);
   const [isFullscreenGrid, setIsFullscreenGrid] = useState(false);
+
+  // New Requested Feature States
+  const [isTutorialOpen, setIsTutorialOpen] = useState(false);
+  const [isReminderSettingsOpen, setIsReminderSettingsOpen] = useState(false);
+  const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false);
+  const [isAuditHistoryOpen, setIsAuditHistoryOpen] = useState(false);
+  const [isDatabaseSettingsOpen, setIsDatabaseSettingsOpen] = useState(false);
+  const [quickAddSlotInfo, setQuickAddSlotInfo] = useState<{ day: DayKey; startMinutes: number } | null>(null);
+  const [slotInterval, setSlotInterval] = useState<number>(() => {
+    try {
+      const s = localStorage.getItem('timegrid_slot_interval');
+      return s ? Number(s) : 30;
+    } catch {
+      return 30;
+    }
+  });
+
+  const handleToggleSlotInterval = useCallback(() => {
+    setSlotInterval((prev) => {
+      const next = prev === 30 ? 15 : 30;
+      try {
+        localStorage.setItem('timegrid_slot_interval', String(next));
+      } catch {}
+      return next;
+    });
+  }, []);
 
   // Toast notification
   const [toast, setToast] = useState<{
@@ -66,6 +115,100 @@ export default function App() {
       }, 3500);
     },
     []
+  );
+
+  // Push Snapshot to Undo History Stack (Max 35 states)
+  const pushHistory = useCallback((currentBlocks: TimeBlock[]) => {
+    setHistory((prev) => {
+      const next = [...prev, currentBlocks];
+      if (next.length > 35) return next.slice(next.length - 35);
+      return next;
+    });
+    setRedoStack([]); // Clear redo upon new user mutation
+  }, []);
+
+  // Database Management Actions
+  const handleClearDatabase = useCallback(() => {
+    PlannerStorageService.clear();
+    setBlocks([]);
+    setTemplates(INITIAL_TEMPLATES);
+    showToast('کل پایگاه داده پاک‌سازی شد و به وضعیت اولیه برگشت.', 'warn');
+  }, [showToast]);
+
+  const handleClearCurrentWeek = useCallback(() => {
+    pushHistory(blocks);
+    setBlocks([]);
+    PlannerStorageService.saveBlocks([]);
+    showToast('بلوک‌های هفته جاری با موفقیت پاک شدند.', 'info');
+  }, [blocks, pushHistory, showToast]);
+
+  const handleLoadWeekFromDB = useCallback(
+    (targetWeekId: string) => {
+      const newState = PlannerStorageService.switchActiveWeek(targetWeekId);
+      setBlocks(newState.blocks || []);
+      setPlannerTitle(newState.title);
+      setWeekRange(newState.weekRange);
+      const activeWeek = (newState.weeks || {})[targetWeekId];
+      if (activeWeek?.saturdayDate) {
+        setCurrentDate(new Date(activeWeek.saturdayDate));
+      }
+      showToast(`هفته «${newState.title}» با موفقیت فعال شد.`, 'success');
+    },
+    [showToast]
+  );
+
+  const handleDeleteWeekFromDB = useCallback(
+    (targetWeekId: string) => {
+      const success = PlannerStorageService.deleteSavedWeek(targetWeekId);
+      if (success) {
+        const state = PlannerStorageService.loadSync();
+        setBlocks(state.blocks || []);
+        setPlannerTitle(state.title);
+        setWeekRange(state.weekRange);
+        showToast('هفته مورد نظر با موفقیت از پایگاه داده حذف شد.', 'info');
+      }
+    },
+    [showToast]
+  );
+
+  // Undo Handler
+  const handleUndo = useCallback(() => {
+    if (history.length === 0) {
+      showToast('عملی برای بازگشت (Undo) وجود ندارد.', 'info');
+      return;
+    }
+    const previous = history[history.length - 1];
+    setHistory((prev) => prev.slice(0, prev.length - 1));
+    setRedoStack((prev) => [...prev, blocks]);
+    setBlocks(previous);
+    PlannerStorageService.saveBlocks(previous);
+    showToast('آخرین تغییر با موفقیت بازگردانده شد (Undo).', 'info');
+  }, [history, blocks, showToast]);
+
+  // Redo Handler
+  const handleRedo = useCallback(() => {
+    if (redoStack.length === 0) {
+      showToast('عملی برای پیش‌روی (Redo) وجود ندارد.', 'info');
+      return;
+    }
+    const next = redoStack[redoStack.length - 1];
+    setRedoStack((prev) => prev.slice(0, prev.length - 1));
+    setHistory((prev) => [...prev, blocks]);
+    setBlocks(next);
+    PlannerStorageService.saveBlocks(next);
+    showToast('تغییر مجدداً اعمال شد (Redo).', 'info');
+  }, [redoStack, blocks, showToast]);
+
+  // Emergency Recovery Plan Application
+  const handleApplyEmergencyRecovery = useCallback(
+    (newBlocks: TimeBlock[], message: string) => {
+      pushHistory(blocks);
+      setBlocks(newBlocks);
+      PlannerStorageService.saveBlocks(newBlocks);
+      showToast(message, 'success');
+      setIsEmergencyRecoveryOpen(false);
+    },
+    [blocks, pushHistory, showToast]
   );
 
   // Load from LocalStorage on mount (with automatic sanitation of old gaming/ps4 references)
@@ -96,6 +239,19 @@ export default function App() {
     };
 
     try {
+      // First try robust PlannerStorageService (v3 with multi-week & IndexedDB)
+      const fullState = PlannerStorageService.loadSync();
+      if (fullState && fullState.blocks && Array.isArray(fullState.blocks)) {
+        setBlocks(fullState.blocks.map(sanitizeBlock));
+        if (fullState.title) setPlannerTitle(fullState.title);
+        if (fullState.weekRange) setWeekRange(fullState.weekRange);
+        if (fullState.templates && Array.isArray(fullState.templates)) {
+          setTemplates(fullState.templates.map(sanitizeTemplate));
+        }
+        return;
+      }
+
+      // Fallback: check legacy v2 storage
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
@@ -124,9 +280,17 @@ export default function App() {
     }
   }, []);
 
-  // Save to LocalStorage on changes
+  // Save to Storage on changes (Both multi-week V3 and legacy V2 fallback)
   useEffect(() => {
     try {
+      PlannerStorageService.saveCurrentWeekState({
+        title: plannerTitle,
+        weekRange,
+        blocks,
+        templates,
+        date: currentDate,
+      });
+
       const dataToSave = {
         version: '2.0.0',
         title: plannerTitle,
@@ -137,9 +301,69 @@ export default function App() {
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
     } catch (e) {
-      console.error('Failed to save to localStorage', e);
+      console.error('Failed to save planner state', e);
     }
-  }, [plannerTitle, weekRange, blocks, templates]);
+  }, [plannerTitle, weekRange, blocks, templates, currentDate]);
+
+  // Audio Reminders Synchronization
+  useEffect(() => {
+    reminderService.init(blocks, (alert) => {
+      showToast(`🔔 ${alert.title} (${alert.timeString})`, 'info');
+    });
+    return () => reminderService.destroy();
+  }, [blocks, showToast]);
+
+  // Handle switching active week via Jalali Calendar
+  const handleSelectWeekDate = useCallback((date: Date) => {
+    setCurrentDate(date);
+    const newState = PlannerStorageService.switchActiveWeek(date);
+    setBlocks(newState.blocks);
+    setPlannerTitle(newState.title);
+    setWeekRange(newState.weekRange);
+    showToast(`برنامه هفته «${newState.weekRange}» با موفقیت بارگذاری شد.`, 'success');
+  }, [showToast]);
+
+  // Handle previous week navigation (-7 days)
+  const handlePrevWeek = useCallback(() => {
+    const prevDate = new Date(currentDate);
+    prevDate.setDate(prevDate.getDate() - 7);
+    handleSelectWeekDate(prevDate);
+  }, [currentDate, handleSelectWeekDate]);
+
+  // Handle next week navigation (+7 days)
+  const handleNextWeek = useCallback(() => {
+    const nextDate = new Date(currentDate);
+    nextDate.setDate(nextDate.getDate() + 7);
+    handleSelectWeekDate(nextDate);
+  }, [currentDate, handleSelectWeekDate]);
+
+  // Handle opening create week modal
+  const handleOpenCreateWeek = useCallback((date?: Date) => {
+    const target = date || new Date(currentDate.getTime() + 7 * 24 * 60 * 60 * 1000);
+    setTargetCreateDate(target);
+    setIsCreateWeekModalOpen(true);
+  }, [currentDate]);
+
+  // Handle confirming new week creation
+  const handleConfirmCreateWeek = useCallback((params: {
+    targetDate: Date;
+    title: string;
+    weekRange: string;
+    copyRoutineFromCurrent: boolean;
+  }) => {
+    pushHistory(blocks);
+    const newState = PlannerStorageService.createNewWeek(params);
+    setCurrentDate(params.targetDate);
+    setBlocks(newState.blocks);
+    setPlannerTitle(newState.title);
+    setWeekRange(newState.weekRange);
+    showToast(
+      params.copyRoutineFromCurrent
+        ? 'هفته جدید با شبیه‌سازی هوشمند روتین هفتگی ایجاد شد.'
+        : 'هفته کاری جدید با برگه خالی ایجاد شد.',
+      'success'
+    );
+  }, [blocks, pushHistory, showToast]);
 
   // Dragging template from sidebar bank
   const handleDragStartTemplate = (
@@ -176,6 +400,7 @@ export default function App() {
       completed: false,
     };
 
+    pushHistory(blocks);
     setBlocks((prev) => [...prev, newBlock]);
     showToast(`«${template.title}» با موفقیت به جدول اضافه شد.`);
   };
@@ -186,6 +411,7 @@ export default function App() {
     targetDay: DayKey,
     newStartMinutes: number
   ) => {
+    pushHistory(blocks);
     setBlocks((prev) =>
       prev.map((b) => {
         if (b.id !== blockId) return b;
@@ -204,6 +430,7 @@ export default function App() {
 
   // Resizing block
   const handleResizeBlock = (blockId: string, newDurationMinutes: number) => {
+    pushHistory(blocks);
     setBlocks((prev) =>
       prev.map((b) =>
         b.id === blockId ? { ...b, durationMinutes: newDurationMinutes } : b
@@ -217,6 +444,7 @@ export default function App() {
     updateAllMatching = false,
     originalTitle?: string
   ) => {
+    pushHistory(blocks);
     setBlocks((prev) => {
       if (!updateAllMatching) {
         return prev.map((b) => (b.id === updatedBlock.id ? updatedBlock : b));
@@ -244,6 +472,7 @@ export default function App() {
 
   // Toggle completion status of a block
   const handleToggleBlockComplete = (blockId: string) => {
+    pushHistory(blocks);
     setBlocks((prev) =>
       prev.map((b) => (b.id === blockId ? { ...b, completed: !b.completed } : b))
     );
@@ -251,12 +480,14 @@ export default function App() {
 
   // Deleting block
   const handleDeleteBlock = (blockId: string) => {
+    pushHistory(blocks);
     setBlocks((prev) => prev.filter((b) => b.id !== blockId));
     showToast('بلوک زمانی حذف گردید.', 'info');
   };
 
   // Duplicate block to another day
   const handleDuplicateBlock = (sourceBlock: TimeBlock, targetDay: DayKey) => {
+    pushHistory(blocks);
     const duplicated: TimeBlock = {
       ...sourceBlock,
       id: `block-dup-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
@@ -267,9 +498,67 @@ export default function App() {
     showToast(`بلوک با موفقیت در روز جدید کپی شد.`);
   };
 
-  // Quick Add from sidebar to Saturday 09:00 or current
-  const handleQuickAdd = (template: BlockTemplate) => {
-    handleDropNewBlock('sat', 9 * 60, template);
+  // Quick Add from sidebar to target day with smart empty-gap search
+  const handleQuickAdd = (template: BlockTemplate, targetDay?: DayKey) => {
+    const day = targetDay || 'sat';
+    const dayBlocks = blocks
+      .filter((b) => b.day === day)
+      .sort((a, b) => a.startMinutes - b.startMinutes);
+
+    // Look for first suitable gap of >= template.defaultDuration
+    let candidateStart = 8 * 60; // start looking from 08:00
+    for (const b of dayBlocks) {
+      if (b.startMinutes >= candidateStart + template.defaultDuration) {
+        break; // found gap before this block!
+      }
+      if (b.startMinutes + b.durationMinutes > candidateStart) {
+        candidateStart = b.startMinutes + b.durationMinutes;
+      }
+    }
+
+    const maxAllowedStart = 24 * 60 - template.defaultDuration;
+    const finalStart = Math.min(
+      maxAllowedStart,
+      Math.max(7 * 60, Math.round(candidateStart / 30) * 30)
+    );
+
+    handleDropNewBlock(day, finalStart, template);
+  };
+
+  // Swap two blocks with mode selection ('keep_durations' | 'fit_durations')
+  const handleSwapBlocks = (
+    blockA: TimeBlock,
+    blockB: TimeBlock,
+    mode: 'keep_durations' | 'fit_durations'
+  ) => {
+    pushHistory(blocks);
+    setBlocks((prev) =>
+      prev.map((b) => {
+        if (b.id === blockA.id) {
+          return {
+            ...b,
+            day: blockB.day,
+            startMinutes: blockB.startMinutes,
+            durationMinutes:
+              mode === 'fit_durations' ? blockB.durationMinutes : blockA.durationMinutes,
+          };
+        }
+        if (b.id === blockB.id) {
+          return {
+            ...b,
+            day: blockA.day,
+            startMinutes: blockA.startMinutes,
+            durationMinutes:
+              mode === 'fit_durations' ? blockA.durationMinutes : blockB.durationMinutes,
+          };
+        }
+        return b;
+      })
+    );
+    showToast(
+      `بلوک «${blockA.title}» با بلوک «${blockB.title}» با موفقیت جابه‌جا شد.`,
+      'success'
+    );
   };
 
   // TEMPLATES BANK EDITING CAPABILITIES:
@@ -352,6 +641,7 @@ export default function App() {
     blocks: TimeBlock[];
     templates?: BlockTemplate[];
   }) => {
+    pushHistory(blocks);
     if (newState.title) setPlannerTitle(newState.title);
     if (newState.weekRange) setWeekRange(newState.weekRange);
     setBlocks(newState.blocks);
@@ -364,6 +654,7 @@ export default function App() {
     shiftMinutes: number,
     afterMinutes: number
   ) => {
+    pushHistory(blocks);
     setBlocks((prev) =>
       prev.map((b) => {
         if (b.day !== day || b.startMinutes < afterMinutes) return b;
@@ -393,6 +684,7 @@ export default function App() {
   // Reset to sample AI/Software student schedule
   const handleResetSample = () => {
     if (confirm('آیا می‌خواهید برنامه نمونه پیش‌فرض را بارگذاری کنید؟')) {
+      pushHistory(blocks);
       setBlocks(INITIAL_SAMPLE_BLOCKS);
       setTemplates(INITIAL_TEMPLATES);
       setPlannerTitle('برنامه‌ریز هفتگی تایم‌باکسینگ (Anti-Fragile)');
@@ -407,6 +699,7 @@ export default function App() {
   };
 
   const handleConfirmClear = () => {
+    pushHistory(blocks);
     setBlocks([]);
     setIsClearModalOpen(false);
     showToast('تمامی بلوک‌های هفته پاک شدند. پشتیبان JSON در سیستم شما ذخیره گردید.', 'info');
@@ -423,6 +716,7 @@ export default function App() {
   }) => {
     const target = blocks.find((b) => b.id === params.originalBlockId);
     if (!target) return;
+    pushHistory(blocks);
 
     const breakBlock: TimeBlock = {
       id: `break-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
@@ -489,21 +783,40 @@ export default function App() {
     }
   };
 
-  // Intercept Ctrl+P / Cmd+P to open the Print Modal, and F/Esc to toggle fullscreen mode
+  // Intercept keyboard shortcuts: Ctrl+P (Print), Ctrl+Z (Undo), Ctrl+Y / Ctrl+Shift+Z (Redo), F/Esc (Fullscreen)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
-        e.preventDefault();
-        setIsPrintModalOpen(true);
-        return;
-      }
-
       // Check if user is typing in an input or textarea
       const activeEl = document.activeElement;
       const isInputActive =
         activeEl instanceof HTMLInputElement ||
         activeEl instanceof HTMLTextAreaElement ||
         activeEl?.getAttribute('contenteditable') === 'true';
+
+      // Undo / Redo Shortcuts (Works globally)
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+        if (!isInputActive) {
+          e.preventDefault();
+          if (e.shiftKey) {
+            handleRedo();
+          } else {
+            handleUndo();
+          }
+          return;
+        }
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) {
+        if (!isInputActive) {
+          e.preventDefault();
+          handleRedo();
+          return;
+        }
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        setIsPrintModalOpen(true);
+        return;
+      }
 
       if (!isInputActive) {
         if (e.key === 'f' || e.key === 'F') {
@@ -516,7 +829,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [handleUndo, handleRedo]);
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-100/60 text-slate-900 font-['Vazirmatn',sans-serif]">
@@ -539,6 +852,8 @@ export default function App() {
               setBreakTargetBlock(b);
               setIsInsertBreakOpen(true);
             }}
+            currentDate={currentDate}
+            onOpenCalendar={() => setIsCalendarModalOpen(true)}
           />
         </div>
       )}
@@ -549,8 +864,42 @@ export default function App() {
         onUpdateTitle={setPlannerTitle}
         weekRange={weekRange}
         onUpdateWeekRange={setWeekRange}
-        onSaveJSON={() => setIsJsonModalOpen(true)}
-        onLoadJSON={() => setIsJsonModalOpen(true)}
+        onSaveJSON={() => {
+          const dataToSave = {
+            version: '3.0.0',
+            title: plannerTitle,
+            weekRange,
+            updatedAt: new Date().toISOString(),
+            blocks,
+            templates,
+          };
+          const blob = new Blob([JSON.stringify(dataToSave, null, 2)], {
+            type: 'application/json',
+          });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `anti-fragile-planner-${new Date().toISOString().split('T')[0]}.json`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          showToast('فایل برنامه با موفقیت دانلود شد.', 'success');
+        }}
+        onLoadJSON={(file) => {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            try {
+              const content = e.target?.result as string;
+              const parsed = JSON.parse(content);
+              handleApplyJsonState(parsed);
+              showToast('فایل برنامه با موفقیت بارگذاری شد.', 'success');
+            } catch {
+              showToast('خطا در خواندن فایل JSON', 'warn');
+            }
+          };
+          reader.readAsText(file);
+        }}
         onPrint={() => setIsPrintModalOpen(true)}
         onOpenDailyReport={() => setIsDailyReportOpen(true)}
         onOpenSpecialReport={() => setIsSpecialReportOpen(true)}
@@ -559,10 +908,29 @@ export default function App() {
         onResetSample={handleResetSample}
         onClearAll={handleClearAll}
         onOpenLateShift={() => setIsLateShiftOpen(true)}
+        onOpenEmergencyRecovery={() => setIsEmergencyRecoveryOpen(true)}
+        onOpenTutorial={() => setIsTutorialOpen(true)}
+        onOpenReminderSettings={() => setIsReminderSettingsOpen(true)}
+        onOpenCategoryManager={() => setIsCategoryManagerOpen(true)}
+        onOpenAuditHistory={() => setIsAuditHistoryOpen(true)}
+        onOpenDatabaseSettings={() => setIsDatabaseSettingsOpen(true)}
+        totalBlocksCount={blocks.length}
+        slotInterval={slotInterval}
+        onToggleSlotInterval={handleToggleSlotInterval}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        canUndo={history.length > 0}
+        canRedo={redoStack.length > 0}
         onToggleStats={() => setShowStats(!showStats)}
         showStats={showStats}
         isFullscreen={isFullscreenGrid}
         onToggleFullscreen={() => setIsFullscreenGrid((prev) => !prev)}
+        currentDate={currentDate}
+        onOpenCalendar={() => setIsCalendarModalOpen(true)}
+        onOpenCreateWeek={() => handleOpenCreateWeek()}
+        onPrevWeek={handlePrevWeek}
+        onNextWeek={handleNextWeek}
+        savedWeeksCount={PlannerStorageService.getAllSavedWeekIds().length}
       />
 
       {/* Week Balance Neuro Dashboard (Collapsible) */}
@@ -595,13 +963,20 @@ export default function App() {
           onDropNewBlock={handleDropNewBlock}
           onMoveBlock={handleMoveBlock}
           onResizeBlock={handleResizeBlock}
+          onSwapBlocks={handleSwapBlocks}
           plannerTitle={plannerTitle}
           weekRange={weekRange}
-          isFullscreen={false}
-          onToggleFullscreen={() => setIsFullscreenGrid(true)}
+          isFullscreen={isFullscreenGrid}
+          onToggleFullscreen={() => setIsFullscreenGrid(!isFullscreenGrid)}
           onOpenInsertBreak={(b) => {
             setBreakTargetBlock(b);
             setIsInsertBreakOpen(true);
+          }}
+          currentDate={currentDate}
+          onOpenCalendar={() => setIsCalendarModalOpen(true)}
+          slotInterval={slotInterval}
+          onSlotClick={(day, startMinutes) => {
+            setQuickAddSlotInfo({ day, startMinutes });
           }}
         />
       </div>
@@ -630,6 +1005,16 @@ export default function App() {
           onClose={() => setIsLateShiftOpen(false)}
           blocks={blocks}
           onApplyShift={handleApplyLateShift}
+        />
+      )}
+
+      {/* Emergency Recovery & Anti-Fragile Re-scheduler Modal (Scrolled on phone, fatigue, crisis days) */}
+      {isEmergencyRecoveryOpen && (
+        <EmergencyRecoveryModal
+          isOpen={true}
+          onClose={() => setIsEmergencyRecoveryOpen(false)}
+          blocks={blocks}
+          onApplyPlan={handleApplyEmergencyRecovery}
         />
       )}
 
@@ -736,6 +1121,131 @@ export default function App() {
             setBreakTargetBlock(null);
           }}
           onConfirmBreak={handleConfirmInsertBreak}
+        />
+      )}
+
+      {/* Persian / Jalali Calendar & Week Selector Modal */}
+      <JalaliCalendarModal
+        isOpen={isCalendarModalOpen}
+        onClose={() => setIsCalendarModalOpen(false)}
+        currentDate={currentDate}
+        onSelectWeekDate={handleSelectWeekDate}
+        onOpenCreateWeekModal={(targetDate) => {
+          setIsCalendarModalOpen(false);
+          handleOpenCreateWeek(targetDate);
+        }}
+        savedWeekIds={PlannerStorageService.getAllSavedWeekIds()}
+      />
+
+      {/* Automated Create New Week Modal (Machine Learning Routine Synthesis & Clean Canvas) */}
+      <CreateNewWeekModal
+        isOpen={isCreateWeekModalOpen}
+        onClose={() => setIsCreateWeekModalOpen(false)}
+        targetDate={targetCreateDate}
+        onConfirmCreate={handleConfirmCreateWeek}
+      />
+
+      {/* Interactive Step-by-Step Tutorial & Onboarding Modal */}
+      <TutorialModal
+        isOpen={isTutorialOpen}
+        onClose={() => setIsTutorialOpen(false)}
+      />
+
+      {/* Audio Chime & Reminder Settings Modal */}
+      <ReminderSettingsModal
+        isOpen={isReminderSettingsOpen}
+        onClose={() => setIsReminderSettingsOpen(false)}
+        onShowToast={showToast}
+      />
+
+      {/* Custom Category Manager Modal */}
+      <CategoryManagerModal
+        isOpen={isCategoryManagerOpen}
+        onClose={() => setIsCategoryManagerOpen(false)}
+        onShowToast={showToast}
+      />
+
+      {/* Advanced Daily Audit Reports Database Modal */}
+      <DailyAuditHistoryModal
+        isOpen={isAuditHistoryOpen}
+        onClose={() => setIsAuditHistoryOpen(false)}
+        onOpenDailyReportForDay={(day) => {
+          setIsDailyReportOpen(true);
+        }}
+        onShowToast={showToast}
+      />
+
+      {/* Super Strong Database & Storage Manager Modal */}
+      <DatabaseSettingsModal
+        isOpen={isDatabaseSettingsOpen}
+        onClose={() => setIsDatabaseSettingsOpen(false)}
+        totalBlocks={blocks.length}
+        totalTemplates={templates.length}
+        totalNotes={0}
+        onClearDatabase={handleClearDatabase}
+        onClearCurrentWeek={handleClearCurrentWeek}
+        onLoadWeek={handleLoadWeekFromDB}
+        onDeleteWeek={handleDeleteWeekFromDB}
+        activeWeekId={getWeekId(currentDate)}
+        onDownloadBackup={() => {
+          const dataToSave: PlannerData = {
+            version: '2.0.0',
+            exportedAt: new Date().toISOString(),
+            plannerTitle,
+            weekRange,
+            blocks,
+            templates,
+          };
+          const blob = new Blob([JSON.stringify(dataToSave, null, 2)], {
+            type: 'application/json',
+          });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `anti-fragile-backup-${new Date().toISOString().split('T')[0]}.json`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          showToast('فایل پشتیبان کامل با موفقیت دانلود شد.', 'success');
+        }}
+        onRestoreBackup={(file) => {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            try {
+              const content = e.target?.result as string;
+              const parsed = JSON.parse(content);
+              handleApplyJsonState(parsed);
+              showToast('فایل پشتیبان با موفقیت بازیابی شد.', 'success');
+            } catch {
+              showToast('خطا در خواندن فایل پشتیبان JSON', 'warn');
+            }
+          };
+          reader.readAsText(file);
+        }}
+        onShowToast={showToast}
+        customCategoryColors={{}}
+        onUpdateCategoryColor={() => {}}
+        onResetCategoryColors={() => {}}
+      />
+
+      {/* 1-Click Quick Add Slot Modal */}
+      {quickAddSlotInfo && (
+        <QuickAddSlotModal
+          isOpen={true}
+          onClose={() => setQuickAddSlotInfo(null)}
+          day={quickAddSlotInfo.day}
+          startMinutes={quickAddSlotInfo.startMinutes}
+          templates={templates}
+          onAddBlock={(newBlock) => {
+            const id = 'block_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+            const fullBlock: TimeBlock = { ...newBlock, id };
+            pushHistory(blocks);
+            const updated = [...blocks, fullBlock];
+            setBlocks(updated);
+            PlannerStorageService.saveBlocks(updated);
+          }}
+          onShowToast={showToast}
         />
       )}
 

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Plus,
   GripVertical,
@@ -12,8 +12,9 @@ import {
   Layers,
   Check,
 } from 'lucide-react';
-import { BlockTemplate, CategoryKey } from '../types';
-import { CATEGORIES, formatDurationFa } from '../constants/plannerConfig';
+import { BlockTemplate, CategoryKey, DayKey } from '../types';
+import { CATEGORIES, formatDurationFa, DAYS } from '../constants/plannerConfig';
+import { categoryService } from '../services/categoryService';
 import { CategoryIcon } from './CategoryIcon';
 
 interface SidebarBankProps {
@@ -23,7 +24,7 @@ interface SidebarBankProps {
   onDuplicateTemplate: (template: BlockTemplate) => void;
   onDeleteTemplate: (templateId: string) => void;
   onResetDefaultTemplates: () => void;
-  onQuickAdd: (template: BlockTemplate) => void;
+  onQuickAdd: (template: BlockTemplate, targetDay?: DayKey) => void;
   onDragStartTemplate: (e: React.DragEvent, template: BlockTemplate) => void;
 }
 
@@ -39,6 +40,15 @@ export const SidebarBank: React.FC<SidebarBankProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
+  const [openDayPickerId, setOpenDayPickerId] = useState<string | null>(null);
+
+  // Dynamic Categories from categoryService
+  const [categoriesMap, setCategoriesMap] = useState(() => categoryService.getAll());
+  useEffect(() => {
+    return categoryService.subscribe((cats) => {
+      setCategoriesMap({ ...cats });
+    });
+  }, []);
 
   // Filtered templates based on search & category
   const filteredTemplates = useMemo(() => {
@@ -56,16 +66,14 @@ export const SidebarBank: React.FC<SidebarBankProps> = ({
     });
   }, [templates, searchQuery, selectedCategoryFilter]);
 
-  // Quick Category Groups for Filter Tabs
-  const categoryGroups = [
-    { key: 'all', label: 'همه' },
-    { key: 'work', label: 'کد و فرانت' },
-    { key: 'pytorch', label: 'پایتورچ' },
-    { key: 'python', label: 'پایتون' },
-    { key: 'recovery', label: 'استراحت' },
-    { key: 'gaming', label: 'رفرش' },
-    { key: 'habit', label: 'عادت‌ها' },
-  ];
+  // Quick Category Groups for Filter Tabs (derived dynamically)
+  const categoryGroups = useMemo(() => {
+    const list: Array<{ key: string; label: string }> = [{ key: 'all', label: 'همه' }];
+    (Object.values(categoriesMap) as Array<{ key: string; label: string }>).forEach((c) => {
+      list.push({ key: c.key, label: c.label });
+    });
+    return list;
+  }, [categoriesMap]);
 
   return (
     <aside className="w-full lg:w-80 xl:w-88 shrink-0 bg-white/95 backdrop-blur-md border-b lg:border-b-0 lg:border-l border-slate-200/90 p-4 flex flex-col gap-3.5 no-print select-none shadow-xs">
@@ -146,7 +154,7 @@ export const SidebarBank: React.FC<SidebarBankProps> = ({
           </div>
         ) : (
           filteredTemplates.map((tpl) => {
-            const theme = CATEGORIES[tpl.category] || CATEGORIES.custom;
+            const theme = categoriesMap[tpl.category] || CATEGORIES[tpl.category] || categoriesMap.custom || CATEGORIES.custom;
             return (
               <div
                 key={tpl.id}
@@ -195,21 +203,27 @@ export const SidebarBank: React.FC<SidebarBankProps> = ({
 
                 {/* Explicit Action Buttons (Edit, Quick Add, Duplicate, Delete) */}
                 <div className="mt-2.5 pt-2 border-t border-black/5 flex items-center justify-between gap-1.5">
-                  {/* Quick Add into Grid */}
+                  {/* Quick Add / Day Picker Toggle */}
                   <button
+                    type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      onQuickAdd(tpl);
+                      setOpenDayPickerId(openDayPickerId === tpl.id ? null : tpl.id);
                     }}
-                    className="flex-1 py-1 px-2 text-[10.5px] font-bold bg-white/95 hover:bg-white text-slate-800 hover:text-indigo-700 rounded-lg shadow-2xs border border-slate-200/90 flex items-center justify-center gap-1 cursor-pointer transition-colors"
-                    title="افزودن سریع به روز جاری"
+                    className={`flex-1 py-1 px-2 text-[10.5px] font-bold rounded-lg shadow-2xs border transition-colors flex items-center justify-center gap-1 cursor-pointer ${
+                      openDayPickerId === tpl.id
+                        ? 'bg-indigo-600 text-white border-indigo-600'
+                        : 'bg-white/95 hover:bg-white text-slate-800 hover:text-indigo-700 border-slate-200/90'
+                    }`}
+                    title="افزودن سریع به روز دلخواه در جدول"
                   >
                     <Plus className="w-3 h-3 stroke-[2.5]" />
-                    <span>افزودن</span>
+                    <span>افزودن به روز ▾</span>
                   </button>
 
                   {/* PROMINENT EDIT BUTTON (Explicitly Requested) */}
                   <button
+                    type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       onEditTemplate(tpl);
@@ -223,6 +237,7 @@ export const SidebarBank: React.FC<SidebarBankProps> = ({
 
                   {/* Duplicate Template */}
                   <button
+                    type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       onDuplicateTemplate(tpl);
@@ -235,6 +250,7 @@ export const SidebarBank: React.FC<SidebarBankProps> = ({
 
                   {/* Delete Template */}
                   <button
+                    type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       if (confirm(`آیا از حذف الگوی «${tpl.title}» از بانک اطمینان دارید؟`)) {
@@ -247,6 +263,41 @@ export const SidebarBank: React.FC<SidebarBankProps> = ({
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
+
+                {/* 1-Click Day Picker Strip (Expands on click of "افزودن به روز") */}
+                {openDayPickerId === tpl.id && (
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    className="mt-2 pt-2 border-t border-indigo-200/60 bg-white/95 rounded-xl p-1.5 shadow-xs animate-in fade-in zoom-in-95 duration-100"
+                  >
+                    <div className="flex items-center justify-between mb-1 text-[10px] text-slate-600 font-bold px-0.5">
+                      <span>انتخاب روز برای زمان‌بندی هوشمند:</span>
+                      <button
+                        type="button"
+                        onClick={() => setOpenDayPickerId(null)}
+                        className="text-slate-400 hover:text-slate-600 text-[10px]"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-7 gap-1">
+                      {DAYS.map((d) => (
+                        <button
+                          key={d.id}
+                          type="button"
+                          onClick={() => {
+                            onQuickAdd(tpl, d.id);
+                            setOpenDayPickerId(null);
+                          }}
+                          className="py-1 rounded-md text-[10px] font-bold text-center bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-900 border border-indigo-200/70 transition-all cursor-pointer shadow-2xs hover:scale-105"
+                          title={`افزودن خودکار به ${d.nameFa} در اولین اسلات خالی`}
+                        >
+                          {d.shortFa}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })
