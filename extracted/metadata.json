@@ -1,6 +1,0 @@
-{
-  "name": "Anti-Fragile Weekly Timeboxing Planner",
-  "description": "برنامه‌ریز هفتگی تایم‌باکسینگ ضد شکننده و منعطف برای دانشجویان و مهندسان نرم‌افزار و هوش مصنوعی با قابلیت Drag & Drop و خروجی چاپی A4",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
