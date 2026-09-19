@@ -383,13 +383,13 @@ export const FocusModeModal: React.FC<FocusModeModalProps> = ({
   const displayMinutes = Math.floor((secondsRemaining % 3600) / 60);
   const displaySeconds = secondsRemaining % 60;
 
-  // Dynamic Neuro-Motivational Phrase
+  // Dynamic Focus Motivational Phrase
   const neuroPhrase = (() => {
-    if (secondsRemaining === 0) return 'پایان موفق دوره تمرکز • زمان ریکاوری و تنفس';
-    if (!isRunning) return 'جلسه در حالت مکث • آماده برای بازگشت به جریان عمیق';
-    if (progressRatio < 0.2) return 'فاز خروج از اصطکاک اولیه • تمرکز روی تک‌تسکینگ';
-    if (progressRatio < 0.7) return 'جریان تمرکز عمیق (Flow State) • راندمان شناختی بالا';
-    return 'مرحله نهایی تثبیت دوپامین • اتمام مقتدرانه تسک';
+    if (secondsRemaining === 0) return 'پایان دوره تمرکز • زمان استراحت کوتاه و تنفس';
+    if (!isRunning) return 'جلسه در حالت مکث • آماده برای ادامه فعالیت';
+    if (progressRatio < 0.2) return 'شروع گام اول • تمرکز کامل بر اولویت فعلی';
+    if (progressRatio < 0.7) return 'جریان کار متمرکز • تداوم ریتم کاری';
+    return 'مرحله پایانی • تثبیت دستاورد و اتمام کار';
   })();
 
   return (
@@ -411,10 +411,10 @@ export const FocusModeModal: React.FC<FocusModeModalProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-sm sm:text-base font-black tracking-tight text-white">
-                حالت تمرکز عمیق (Deep Focus)
+                حالت تمرکز بالا (Deep Focus)
               </h2>
               <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                سیستم ضد باگ ایزوله
+                محیط ایزوله و بدون حواس‌پرتی
               </span>
             </div>
             <p className="text-[11px] text-slate-400">

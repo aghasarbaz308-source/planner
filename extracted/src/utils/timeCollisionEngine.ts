@@ -317,3 +317,131 @@ export function evaluatePlannerRules(
 
   return warnings;
 }
+
+/**
+ * Detects whether a time block is an immovable anchor (e.g. classes, university, fixed sleep/routine).
+ * Anchors must never be compressed or shifted automatically.
+ */
+export function isAnchorBlock(block: TimeBlock): boolean {
+  if (block.isFixed) return true;
+  if (block.category === 'university') return true;
+
+  const title = (block.title || '').toLowerCase();
+  const sub = (block.subtitle || '').toLowerCase();
+  const note = (block.note || '').toLowerCase();
+  const full = `${title} ${sub} ${note}`;
+
+  if (
+    full.includes('کلاس') ||
+    full.includes('دانشگاه') ||
+    full.includes('خواب') ||
+    full.includes('شام') ||
+    full.includes('فیلم') ||
+    full.includes('ثابت') ||
+    full.includes('رسمی') ||
+    full.includes('شبانه')
+  ) {
+    return true;
+  }
+
+  // Sleep or night routines starting at/after 22:00
+  if (block.startMinutes >= 22 * 60 && (block.category === 'recovery' || block.category === 'habit')) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Intelligent Gap Collapse & Auto-Shift Engine:
+ * Shifts fluid (movable) subsequent blocks upward to seal an empty void,
+ * while strictly respecting and protecting fixed anchors.
+ */
+export function collapseDayGaps(
+  dayBlocks: TimeBlock[],
+  gapStartMinutes: number,
+  freedDurationMinutes: number,
+  bufferMinutes = 0
+): { updatedDayBlocks: TimeBlock[]; shiftedCount: number } {
+  if (dayBlocks.length === 0 || freedDurationMinutes <= 0) {
+    return { updatedDayBlocks: dayBlocks, shiftedCount: 0 };
+  }
+
+  const sorted = [...dayBlocks].sort((a, b) => a.startMinutes - b.startMinutes);
+  const strictlyBefore: TimeBlock[] = [];
+  const candidateBlocks: TimeBlock[] = [];
+
+  for (const b of sorted) {
+    if (b.startMinutes < gapStartMinutes) {
+      strictlyBefore.push(b);
+    } else {
+      candidateBlocks.push(b);
+    }
+  }
+
+  const resultAfter: TimeBlock[] = [];
+  let currentAvailablePointer = gapStartMinutes;
+  let remainingFreedTime = freedDurationMinutes;
+  let shiftedCount = 0;
+
+  for (const b of candidateBlocks) {
+    if (isAnchorBlock(b)) {
+      // Anchors cannot be moved or shifted upward!
+      resultAfter.push(b);
+      currentAvailablePointer = b.startMinutes + b.durationMinutes + bufferMinutes;
+      // Anchor stops subsequent blocks from shifting before this point
+      remainingFreedTime = 0;
+    } else {
+      const maxPossibleShift = Math.max(0, b.startMinutes - currentAvailablePointer);
+      const actualShift = Math.min(maxPossibleShift, remainingFreedTime);
+
+      if (actualShift > 0) {
+        const newStart = b.startMinutes - actualShift;
+        shiftedCount++;
+        resultAfter.push({
+          ...b,
+          startMinutes: newStart,
+        });
+        currentAvailablePointer = newStart + b.durationMinutes + bufferMinutes;
+      } else {
+        resultAfter.push(b);
+        currentAvailablePointer = Math.max(
+          currentAvailablePointer,
+          b.startMinutes + b.durationMinutes + bufferMinutes
+        );
+      }
+    }
+  }
+
+  return {
+    updatedDayBlocks: [...strictlyBefore, ...resultAfter],
+    shiftedCount,
+  };
+}
+
+/**
+ * Convenience method to collapse gaps for a specific day in the full planner blocks list
+ */
+export function smartCollapseGapsForDay(
+  allBlocks: TimeBlock[],
+  dayKey: DayKey,
+  gapStartMinutes: number,
+  freedDurationMinutes: number,
+  bufferMinutes = 0
+): { updatedBlocks: TimeBlock[]; shiftedCount: number } {
+  const dayBlocks = allBlocks.filter((b) => b.day === dayKey);
+  const otherBlocks = allBlocks.filter((b) => b.day !== dayKey);
+
+  const { updatedDayBlocks, shiftedCount } = collapseDayGaps(
+    dayBlocks,
+    gapStartMinutes,
+    freedDurationMinutes,
+    bufferMinutes
+  );
+
+  return {
+    updatedBlocks: [...otherBlocks, ...updatedDayBlocks],
+    shiftedCount,
+  };
+}
+

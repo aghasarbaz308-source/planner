@@ -156,7 +156,7 @@ ${compactScheduleSummary || 'جدول در حال حاضر خالی است.'}
         const candidateModels = [
           'gemini-3.8-flash',
           'gemini-flash-latest',
-          'gemini-2.5-flash',
+          'gemini-3.1-flash-lite',
         ];
 
         let lastErr: any = null;
@@ -342,6 +342,36 @@ ${compactScheduleSummary || 'جدول در حال حاضر خالی است.'}
       }
 
       if (Array.isArray(parsed.actions)) {
+        // Day mapping to ensure Persian and full English names map strictly to DayKey ('sat'|'sun'|'mon'|'tue'|'wed'|'thu'|'fri')
+        const dayMap: Record<string, string> = {
+          'sat': 'sat',
+          'saturday': 'sat',
+          'شنبه': 'sat',
+          'sun': 'sun',
+          'sunday': 'sun',
+          'یکشنبه': 'sun',
+          'یک‌شنبه': 'sun',
+          'mon': 'mon',
+          'monday': 'mon',
+          'دوشنبه': 'mon',
+          'دو‌شنبه': 'mon',
+          'tue': 'tue',
+          'tuesday': 'tue',
+          'سه شنبه': 'tue',
+          'سه‌شنبه': 'tue',
+          'wed': 'wed',
+          'wednesday': 'wed',
+          'چهارشنبه': 'wed',
+          'چهار‌شنبه': 'wed',
+          'thu': 'thu',
+          'thursday': 'thu',
+          'پنجشنبه': 'thu',
+          'پنج‌شنبه': 'thu',
+          'fri': 'fri',
+          'friday': 'fri',
+          'جمعه': 'fri',
+        };
+
         // Safe mapping of legacy/generic categories to valid app category keys
         const categoryMap: Record<string, string> = {
           deep_work: 'work',
@@ -359,6 +389,13 @@ ${compactScheduleSummary || 'جدول در حال حاضر خالی است.'}
 
         for (const act of parsed.actions) {
           if (!act || !act.type) continue;
+          if (act.day) {
+            const rawDay = String(act.day).trim().toLowerCase();
+            const normalizedDay = dayMap[rawDay] || (dayMap[rawDay.replace(/[\u200B-\u200D\uFEFF]/g, '')] || 'sat');
+            act.day = normalizedDay;
+          } else {
+            act.day = 'sat';
+          }
           if (act.title) {
             act.title = cleanBlockTitle(act.title);
           }

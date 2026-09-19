@@ -23,7 +23,7 @@ import {
   XCircle,
   Circle,
 } from 'lucide-react';
-import { TimeBlock } from '../types';
+import { TimeBlock, DayKey } from '../types';
 import {
   DAYS,
   CATEGORIES,
@@ -31,20 +31,13 @@ import {
   minutesToTimeString,
   formatDurationFa,
 } from '../constants/plannerConfig';
+import {
+  normalizeAction,
+  parseLocalUserScheduleIntent,
+  AiAction,
+} from '../utils/aiActionNormalizer';
 
-export interface AiAction {
-  type: 'add_block' | 'update_block' | 'delete_block' | 'clear_day';
-  day?: string;
-  id?: string;
-  title?: string;
-  subtitle?: string;
-  startMinutes?: number;
-  durationMinutes?: number;
-  category?: string;
-  priority?: string;
-  energyLevel?: string;
-  notes?: string;
-}
+export type { AiAction };
 
 export interface ChatMessage {
   id: string;
@@ -64,6 +57,7 @@ interface AiPlannerModalProps {
   blocks: TimeBlock[];
   onApplyActions: (actions: AiAction[]) => void;
   onShowToast: (msg: string, type?: 'info' | 'success' | 'warn') => void;
+  currentDayKey?: DayKey;
 }
 
 const STORAGE_KEY_API_KEY = 'anti_fragile_gemini_api_key';
@@ -82,6 +76,7 @@ export const AiPlannerModal: React.FC<AiPlannerModalProps> = ({
   blocks,
   onApplyActions,
   onShowToast,
+  currentDayKey = 'sat',
 }) => {
   // API Key state
   const [apiKey, setApiKey] = useState<string>(() => {
@@ -267,14 +262,14 @@ export const AiPlannerModal: React.FC<AiPlannerModalProps> = ({
 
       // Robust extraction of reply and actions (prevent any raw JSON leaking)
       let cleanReply = data.reply || 'برنامه شما پردازش شد.';
-      let extractedActions = Array.isArray(data.actions) ? data.actions : [];
+      let rawActions = Array.isArray(data.actions) ? data.actions : [];
 
       if (typeof cleanReply === 'string' && cleanReply.trim().startsWith('{')) {
         try {
           const inner = JSON.parse(cleanReply);
           if (inner.reply) cleanReply = inner.reply;
-          if (Array.isArray(inner.actions) && extractedActions.length === 0) {
-            extractedActions = inner.actions;
+          if (Array.isArray(inner.actions) && rawActions.length === 0) {
+            rawActions = inner.actions;
           }
         } catch {
           const match = cleanReply.match(/"reply"\s*:\s*"((?:[^"\\]|\\.)*)"/);
@@ -283,6 +278,12 @@ export const AiPlannerModal: React.FC<AiPlannerModalProps> = ({
           }
         }
       }
+
+      // Normalize all actions to guarantee valid DayKey, timestamps, and taxonomy
+      const fallbackDay: DayKey = (currentDayKey as DayKey) || 'sat';
+      const extractedActions: AiAction[] = rawActions
+        .map((a: any) => normalizeAction(a, fallbackDay, blocks))
+        .filter((a): a is AiAction => a !== null);
 
       // If actions exist, auto-apply them directly to the schedule so the user sees results immediately
       let didAutoApply = false;
@@ -325,6 +326,28 @@ export const AiPlannerModal: React.FC<AiPlannerModalProps> = ({
         };
         setMessages((prev) => [...prev, cancelMsg]);
         return;
+      }
+
+      // Offline / Resilient Local Scheduling Parser Fallback (Zero Regression & High Availability)
+      const fallbackDay: DayKey = (currentDayKey as DayKey) || 'sat';
+      const localIntent = parseLocalUserScheduleIntent(userPrompt, fallbackDay, blocks);
+      if (localIntent && localIntent.actions.length > 0) {
+        try {
+          onApplyActions(localIntent.actions);
+          const fallbackBotMsg: ChatMessage = {
+            id: 'model_local_' + Date.now(),
+            role: 'model',
+            text: `${localIntent.reply}\n\n*(پردازش هوشمند بدون وقفه: به دلیل اختلال موقت شبکه هوش مصنوعی، ساختار زمان‌بندی شما مستقیماً توسط موتور تحلیلی محلی پردازش و روی جدول ثبت گردید)*`,
+            timestamp: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
+            actions: localIntent.actions,
+            actionsApplied: true,
+          };
+          setMessages((prev) => [...prev, fallbackBotMsg]);
+          onShowToast('دستور با موفقیت به صورت محلی روی جدول اعمال شد.', 'success');
+          return;
+        } catch (localApplyErr) {
+          console.error('Local intent apply failed:', localApplyErr);
+        }
       }
 
       const isTemporary =
